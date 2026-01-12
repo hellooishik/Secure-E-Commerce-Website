@@ -46,22 +46,43 @@ export function AuthProvider({ children }) {
     }
 
     useEffect(() => {
+        let mounted = true;
         const unsubscribe = onAuthStateChanged(auth, async (user) => {
+            if (!mounted) return;
             setCurrentUser(user);
             if (user) {
                 // Fetch user role for frontend logic (Security rules still enforce it on backend)
-                const docRef = doc(db, "users", user.uid);
-                const docSnap = await getDoc(docRef);
-                if (docSnap.exists()) {
-                    setUserRole(docSnap.data().role);
+                try {
+                    const docRef = doc(db, "users", user.uid);
+                    const docSnap = await getDoc(docRef);
+                    if (docSnap.exists()) {
+                        setUserRole(docSnap.data().role);
+                    }
+                } catch (e) {
+                    console.error("Error fetching user role:", e);
                 }
             } else {
                 setUserRole(null);
             }
             setLoading(false);
+        }, (error) => {
+            console.error("Auth state change error:", error);
+            setLoading(false);
         });
 
-        return unsubscribe;
+        // Fallback timeout in case Firebase doesn't respond (e.g., missing config)
+        const timeout = setTimeout(() => {
+            if (loading && mounted) {
+                console.warn("Auth check timed out - assuming no user");
+                setLoading(false);
+            }
+        }, 3000);
+
+        return () => {
+            mounted = false;
+            unsubscribe();
+            clearTimeout(timeout);
+        };
     }, []);
 
     const value = {
@@ -72,9 +93,17 @@ export function AuthProvider({ children }) {
         logout
     };
 
+    if (loading) {
+        return (
+            <div className="flex items-center justify-center min-h-screen">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+            </div>
+        );
+    }
+
     return (
         <AuthContext.Provider value={value}>
-            {!loading && children}
+            {children}
         </AuthContext.Provider>
     );
 }
